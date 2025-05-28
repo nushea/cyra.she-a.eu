@@ -18,12 +18,25 @@ body,
 	height: 100%;
 	position: fixed;
 	left: 0%;
-	top: 2vw;
+	top: 2.5vw;
 	z-index: 0;
 }
 #Left {
 	z-index: 1;
 }
 #Right {
+	z-index: 1;
+}
+#GlobeItems {
+	width: 100%;
+}
+#GlobeTitle {
+	position:relative;
+	z-index: 1;
+	width: 100%;
+	background-color: #1e1e2e;
+}
+#GlobeTitle>p {
+	position:relative;
 	z-index: 1;
 }
