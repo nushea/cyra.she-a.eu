@@ -27,7 +27,7 @@ body,
 }
 
 #Upper {
-	height: 22vh;
+	height: 20vh;
 }
 
 #Lower {
@@ -45,4 +45,13 @@ body,
 #GlobeTitle>p {
 	position:relative;
 	z-index: 1;
+}
+
+@media (max-aspect-ratio: 1) {
+	#Upper {
+		height: 4vh;
+	}
+	#Middle {
+		justify-content: start;
+	}
 }
