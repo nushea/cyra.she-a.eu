@@ -13,22 +13,28 @@ body,
 	height: 80%;
 	position: fixed;
 }
-#canvas {
-	width: 100%;
-	height: 100%;
-	position: fixed;
-	left: 0%;
-	top: 2.5vw;
-	z-index: 0;
-}
 #Left {
 	z-index: 1;
 }
 #Right {
 	z-index: 1;
 }
-#GlobeItems {
+#Middle {
 	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+}
+
+#Upper {
+	height: 22vh;
+}
+
+#Lower {
+	height: 50%;
+	width: 100%;
+	position: static;
+	z-index: 0;
 }
 #GlobeTitle {
 	position:relative;
