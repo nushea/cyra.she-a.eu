@@ -64,6 +64,10 @@ void main() {
             throw new Error("failed to compile vertex shader");
         }
 
+        /*
+         * dot(N, L) = 1/power <=> cos angle = 1 / power <=> angle = arccos(1/power)
+         *
+         */
         const frag = this.compileShader(
             gl.FRAGMENT_SHADER,
             `
@@ -77,6 +81,10 @@ varying vec2 pos_;
 uniform sampler2D map;
 uniform float xRot;
 uniform float yRot;
+uniform vec3 sunDir;
+uniform float ambientFactor;
+
+#define SUN_POWER 5.0
 
 void main() {
     float x2y2 = dot(pos_, pos_);
@@ -92,7 +100,11 @@ void main() {
         );
         float theta = acos(pos.y);
         float phi = mod(atan(pos.x, pos.z), TAU);
-        gl_FragColor = texture2D(map, vec2(phi / TAU, theta / PI));
+        vec3 mapColor = texture2D(map, vec2(phi / TAU, theta / PI)).rgb;
+        float lighting = clamp((dot(pos, -sunDir) * SUN_POWER + 1.0) / 2.0, 0.0, 1.0)
+            * (1.0 - ambientFactor)
+            + ambientFactor;
+        gl_FragColor = vec4(mapColor * lighting, 1.0);
     } else {
         gl_FragColor = vec4(0.0);
     }
@@ -122,13 +134,13 @@ void main() {
 
         /** @type number */
         this.scale_ = 1;
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         this.radius_ = [1, 1];
         /** @type WebGLUniformLocation */
         this.radiusUniform = gl.getUniformLocation(program, "radius");
         /** @type number */
         this.scale = this.scale_;
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         this.radius = this.radius_;
 
         /** @type number */
@@ -144,6 +156,23 @@ void main() {
         this.yRotUniform = gl.getUniformLocation(program, "yRot");
         /** @type number */
         this.yRot = this.yRot_;
+
+        /** @type {[number, number, number]} */
+        this.sunDir_ = [0, 0, -1.0];
+        /** @type WebGLUniformLocation */
+        this.sunDirUniform = gl.getUniformLocation(program, "sunDir");
+        /** @type number */
+        this.sunDir = this.sunDir_;
+
+        /** @type number */
+        this.ambientFactor_ = 1.0;
+        /** @type WebGLUniformLocation */
+        this.ambientFactorUniform = gl.getUniformLocation(
+            program,
+            "ambientFactor"
+        );
+        /** @type number */
+        this.ambientFactor = this.ambientFactor_;
 
         /** @type WebGLUniformLocation */
         this.mapUniform = gl.getUniformLocation(program, "map");
@@ -217,6 +246,28 @@ void main() {
         this.needsRedraw = true;
     }
 
+    get sunDir() {
+        return this.sunDir_;
+    }
+
+    set sunDir(value) {
+        const gl = this.gl;
+        this.sunDir_ = value;
+        gl.uniform3f(this.sunDirUniform, value[0], value[1], value[2]);
+        this.needsRedraw = true;
+    }
+
+    get ambientFactor() {
+        return this.ambientFactor_;
+    }
+
+    set ambientFactor(value) {
+        const gl = this.gl;
+        this.ambientFactor_ = value;
+        gl.uniform1f(this.ambientFactorUniform, value);
+        this.needsRedraw = true;
+    }
+
     setMap(
         /** @type HTMLImageElement */
         mapImage
@@ -242,7 +293,7 @@ void main() {
     }
 
     normalizeClientCoords(
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         [clientX, clientY]
     ) {
         const rect = this.canvasElement.getBoundingClientRect();
@@ -257,7 +308,7 @@ void main() {
     }
 
     z(
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         [x, y]
     ) {
         const x2y2 = x * x + y * y;
@@ -266,14 +317,14 @@ void main() {
     }
 
     anglesToUV(
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         [theta, phi]
     ) {
         return [phi / (2 * Math.PI), theta / Math.PI];
     }
 
     anglesToUnrotatedXYZ(
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         [theta, phi]
     ) {
         const sinTheta = Math.sin(theta);
@@ -285,13 +336,14 @@ void main() {
     }
 
     projectToAnglesWithRots(
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         clientCoords,
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         [xRot, yRot]
     ) {
         const [x, y] = this.normalizeClientCoords(clientCoords);
         const z = this.z([x, y]);
+        if (z === null) return null;
         const pos = [x, y, z];
         [pos[1], pos[2]] = [
             pos[1] * Math.cos(xRot) - pos[2] * Math.sin(xRot),
@@ -307,7 +359,7 @@ void main() {
     }
 
     projectToAngles(
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         clientCoords
     ) {
         return this.projectToAnglesWithRots(clientCoords, [
@@ -317,13 +369,14 @@ void main() {
     }
 
     rotationBetween(
-        /** @type [number, number, number] */
+        /** @type {[number, number, number]} */
         [oldX, oldY, oldZ],
-        /** @type [number, number] */
+        /** @type {[number, number]} */
         clientCoords
     ) {
         const [x, y] = this.normalizeClientCoords(clientCoords);
         const z = this.z([x, y]);
+        if (z === null) return null;
         /*
          *  ox * cos(yRot + dy) + oz * sin(yRot + dy) = x
          * -ox * sin(yRot + dy) + oz * cos(yRot + dy) = oz'
@@ -380,6 +433,9 @@ class Globe {
         /** @type {{
             rotationSpeed: number;
             zoomSpeed: number;
+            ambientFactor: number;
+            ambientLightTransitionZoom: number;
+            ambientLightTransitionZoomMargin: number;
         }} */
         settings,
         /** @type HTMLCanvasElement */
@@ -392,6 +448,9 @@ class Globe {
         /** @type {{
             rotationSpeed: number;
             zoomSpeed: number;
+            ambientFactor: number;
+            ambientLightTransitionZoom: number;
+            ambientLightTransitionZoomMargin: number;
         }} */
         this.settings = settings;
 
@@ -428,9 +487,17 @@ class Globe {
 
         this.mount();
 
+        /** @type number */
+        this.time_ = null;
+        this.time = 0;
+
+        this.scale = 1;
+
         requestAnimationFrame(this.drawFrame);
     }
 
+    /** @type {[number, number] | null} */
+    dragStartClientCoords = null;
     /** @type {[number, number, number] | null} */
     dragStartXYZ = null;
     /** @type boolean */
@@ -441,37 +508,52 @@ class Globe {
         e
     ) => {
         if (!this.regionMapImageData || this.isDragging) return;
-        const [u, v] = this.canvas.anglesToUV(this.canvas.projectToAngles([e.clientX, e.clientY]));
+        const angles = this.canvas.projectToAngles([e.clientX, e.clientY]);
+        if (!angles) return;
+        const [u, v] = this.canvas.anglesToUV(angles);
         const [x, y] = [
             Math.floor(u * this.regionMapImageData.width),
             Math.floor(v * this.regionMapImageData.height),
         ];
         const startIndex = 4 * (y * this.regionMapImageData.width + x);
-        const [r, g, b, a] = this.regionMapImageData.data.slice(startIndex, startIndex + 4);
-        console.log(r, g, b, a);
+        const [r, g, b, a] = this.regionMapImageData.data.slice(
+            startIndex,
+            startIndex + 4
+        );
+        console.log("Clicked", r, g, b, a);
     };
 
     mouseDown = (
         /** @type MouseEvent */
         e
     ) => {
-        this.dragStartXYZ = this.canvas.anglesToUnrotatedXYZ(
-            this.canvas.projectToAngles([e.clientX, e.clientY])
-        );
+        const dragStartAngles = this.canvas.projectToAngles([
+            e.clientX,
+            e.clientY,
+        ]);
+        if (!dragStartAngles) return;
+        this.dragStartClientCoords = [e.clientX, e.clientY];
+        this.dragStartXYZ = this.canvas.anglesToUnrotatedXYZ(dragStartAngles);
         this.isDragging = false;
-        if (!this.dragStartXYZ) return;
     };
 
     mouseUp = () => {
+        this.dragStartClientCoords = null;
         this.dragStartXYZ = null;
     };
+
+    static DRAG_THRESHOLD = 4;
 
     mouseMove = (
         /** @type MouseEvent */
         e
     ) => {
         if (!this.dragStartXYZ) return;
-        this.isDragging = true;
+        const dx = e.clientX - this.dragStartClientCoords[0];
+        const dy = e.clientY - this.dragStartClientCoords[1];
+        if (dx * dx + dy * dy >= Globe.DRAG_THRESHOLD) {
+            this.isDragging = true;
+        }
         const newRots = this.canvas.rotationBetween(this.dragStartXYZ, [
             e.clientX,
             e.clientY,
@@ -485,11 +567,21 @@ class Globe {
         /** @type WheelEvent */
         e
     ) => {
-        this.canvas.scale = Math.max(
-            this.canvas.scale * (1 - e.deltaY * this.settings.zoomSpeed),
+        e.preventDefault();
+        const startAngles = this.canvas.projectToAngles([e.clientX, e.clientY]);
+        this.scale = Math.max(
+            this.scale * (1 - e.deltaY * this.settings.zoomSpeed),
             0.1
         );
-        e.preventDefault();
+        if (!startAngles) return;
+        const startXYZ = this.canvas.anglesToUnrotatedXYZ(startAngles);
+        const newRots = this.canvas.rotationBetween(startXYZ, [
+            e.clientX,
+            e.clientY,
+        ]);
+        if (!newRots) return;
+        this.canvas.xRot = newRots[0];
+        this.canvas.yRot = newRots[1];
     };
 
     mount() {
@@ -517,6 +609,41 @@ class Globe {
         }
     }
 
+    get time() {
+        return this.time_;
+    }
+
+    set time(value) {
+        if (value === this.time_) return;
+        this.time_ = value;
+        const angle = value * 2 * Math.PI;
+        this.canvas.sunDir = [Math.cos(angle), 0, Math.sin(angle)];
+    }
+
+    get scale() {
+        return this.canvas.scale;
+    }
+
+    set scale(value) {
+        this.canvas.scale = value;
+        this.updateAmbientFactor();
+    }
+
+    updateAmbientFactor() {
+        const transitionFactor = Math.sin(
+            clamp(
+                (this.canvas.scale - this.settings.ambientLightTransitionZoom) /
+                    this.settings.ambientLightTransitionZoomMargin,
+                -1,
+                1
+            ) *
+                (Math.PI / 2)
+        );
+        this.canvas.ambientFactor =
+            ((transitionFactor + 1) / 2) * (1 - this.settings.ambientFactor) +
+            this.settings.ambientFactor;
+    }
+
     /** @type {number | null} */
     prevFrameTime = null;
 
@@ -539,12 +666,26 @@ class Globe {
     };
 }
 
-new Globe(
+const globe = new Globe(
     {
         rotationSpeed: 0,
         zoomSpeed: 1 / 1500,
+        ambientFactor: 0.5,
+        ambientLightTransitionZoom: 2,
+        ambientLightTransitionZoomMargin: 1,
     },
     document.getElementById("canvas"),
     "/img/map.png",
     "/img/map.png"
-)
+);
+
+const updateTime = () => {
+    const date = new Date();
+    const earthTime =
+        ((date.getUTCSeconds() / 60 + date.getUTCMinutes()) / 60 +
+            date.getUTCHours()) /
+        24;
+    globe.time = earthTime;
+};
+updateTime();
+setInterval(updateTime, 1000);
