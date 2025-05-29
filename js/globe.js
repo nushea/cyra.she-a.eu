@@ -561,6 +561,7 @@ class Globe {
         if (!newRots) return;
         this.canvas.xRot = newRots[0];
         this.canvas.yRot = newRots[1];
+		console.log("xRot = " + this.canvas.xRot + "\nyRot = " + this.canvas.yRot);
     };
 
     wheel = (
@@ -678,14 +679,19 @@ const globe = new Globe(
     "/img/map.png",
     "/img/map.png"
 );
-
+var randtime = 0;
 const updateTime = () => {
     const date = new Date();
     const earthTime =
         ((date.getUTCSeconds() / 60 + date.getUTCMinutes()) / 60 +
             date.getUTCHours()) /
         24;
-    globe.time = earthTime;
+	randtime += 0.0001;
+	while(randtime >= 1)
+		randtime -= 1;
+    globe.time = randtime;
 };
-updateTime();
-setInterval(updateTime, 1000);
+//updateTime();
+setInterval(updateTime, 1);
+globe.canvas.yRot=3.35;
+globe.canvas.xRot=-.2;
