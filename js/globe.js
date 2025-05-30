@@ -1,3 +1,44 @@
+// load the wasm module
+var script = document.createElement('script');
+script.src = 'https://template.she-a.eu/js/time.js';
+document.head.appendChild(script);
+var curtime;
+script.onload = () => {
+    Module.onRuntimeInitialized = () => {
+        
+		curtime = Module.cwrap('curtime', null, ['number']);
+    };
+};
+
+var i = 0;
+var checkWasmReady = setInterval(() => {
+    if (curtime) {
+		var oup = Module._malloc(50);
+		curtime(oup);
+		var outputString = Module.UTF8ToString(oup);
+		if(outputString.charAt(outputString.length - 3) == ':')
+			outputString = outputString.substring(0, outputString.length - 2) + '0' + outputString.charAt(outputString.length - 2);
+		outputString = outputString.substring(outputString.indexOf(" ") + 1);
+//		outputString = "4:01:01"
+		var actTime = ((parseInt(outputString[0], 16))/16);
+			actTime += 1/32;
+		if(outputString[1] == "x")
+			actTime += 1/32;
+		actTime += parseInt(outputString[2]+outputString[3], 8)/(120*16);
+		actTime += parseInt(outputString[5]+outputString[6],10)/(46*120*16);
+		actTime -= .196; // TODO MAKE MORE RIGUROUSif(outputString[1] == "x")
+		if(actTime < 0) actTime += 1;
+		console.log(outputString, actTime, (parseInt(outputString[0], 16) - 1));
+	     
+	    globe.time = actTime;
+        Module._free(oup);
+    } else {
+		if(i == 0) i = 1;
+		else i*=16;
+    }
+}, 0);
+
+
 function clamp(value, min, max) {
     return value < min ? min : value > max ? max : value;
 }
@@ -689,7 +730,7 @@ const updateTime = () => {
 	randtime += 0.0001;
 	while(randtime >= 1)
 		randtime -= 1;
-    globe.time = randtime;
+//    globe.time = randtime;
 };
 //updateTime();
 setInterval(updateTime, 1);
