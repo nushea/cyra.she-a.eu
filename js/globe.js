@@ -28,7 +28,7 @@ var checkWasmReady = setInterval(() => {
 		actTime += parseInt(outputString[5]+outputString[6],10)/(46*120*16);
 		actTime -= .196; // TODO MAKE MORE RIGUROUSif(outputString[1] == "x")
 		if(actTime < 0) actTime += 1;
-		console.log(outputString, actTime, (parseInt(outputString[0], 16) - 1));
+//		console.log(outputString, actTime, (parseInt(outputString[0], 16) - 1));
 	     
 	    globe.time = actTime;
         Module._free(oup);
@@ -469,6 +469,19 @@ void main() {
     }
 }
 
+function clickRedirect(r, g, b, a){
+	console.log(r, g, b, a, "uwu");
+	if(a > 100){
+		     if(r == 218, g ==  92, b ==  98) window.location.href = "https://nusea.she-a.eu";
+		else if(r == 203, g == 166, b == 247) window.location.href = "https://acrion.she-a.eu";
+		else if(r == 180, g == 190, b == 254) window.location.href = "https://kestun.she-a.eu";
+		else if(r == 245, g == 224, b == 220) window.location.href = "https://litea.she-a.eu";
+		else if(r ==  15, g == 101, b ==  74) window.location.href = "https://hestria.she-a.eu";
+		else if(r == 140, g == 232, b == 109) window.location.href = "https://tinar.she-a.eu";
+	}
+//	window.location.href = "https://sara.isthecutestpersonever.eu";
+}
+
 class Globe {
     constructor(
         /** @type {{
@@ -561,7 +574,7 @@ class Globe {
             startIndex,
             startIndex + 4
         );
-        console.log("Clicked", r, g, b, a);
+        clickRedirect( r, g, b, a);
     };
 
     mouseDown = (
@@ -602,7 +615,7 @@ class Globe {
         if (!newRots) return;
         this.canvas.xRot = newRots[0];
         this.canvas.yRot = newRots[1];
-		console.log("xRot = " + this.canvas.xRot + "\nyRot = " + this.canvas.yRot);
+		//console.log("xRot = " + this.canvas.xRot + "\nyRot = " + this.canvas.yRot);
     };
 
     wheel = (
@@ -718,7 +731,7 @@ const globe = new Globe(
     },
     document.getElementById("canvas"),
     "/img/map.png",
-    "/img/map.png"
+    "/img/color.png"
 );
 var randtime = 0;
 const updateTime = () => {
