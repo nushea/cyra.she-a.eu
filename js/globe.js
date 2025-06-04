@@ -1,44 +1,3 @@
-// load the wasm module
-var script = document.createElement('script');
-script.src = 'https://template.she-a.eu/js/time.js';
-document.head.appendChild(script);
-var curtime;
-script.onload = () => {
-    Module.onRuntimeInitialized = () => {
-        
-		curtime = Module.cwrap('curtime', null, ['number']);
-    };
-};
-
-var i = 0;
-var checkWasmReady = setInterval(() => {
-    if (curtime) {
-		var oup = Module._malloc(50);
-		curtime(oup);
-		var outputString = Module.UTF8ToString(oup);
-		if(outputString.charAt(outputString.length - 3) == ':')
-			outputString = outputString.substring(0, outputString.length - 2) + '0' + outputString.charAt(outputString.length - 2);
-		outputString = outputString.substring(outputString.indexOf(" ") + 1);
-//		outputString = "4:01:01"
-		var actTime = ((parseInt(outputString[0], 16))/16);
-			actTime += 1/32;
-		if(outputString[1] == "x")
-			actTime += 1/32;
-		actTime += parseInt(outputString[2]+outputString[3], 8)/(120*16);
-		actTime += parseInt(outputString[5]+outputString[6],10)/(46*120*16);
-		actTime -= .196; // TODO MAKE MORE RIGUROUSif(outputString[1] == "x")
-		if(actTime < 0) actTime += 1;
-//		console.log(outputString, actTime, (parseInt(outputString[0], 16) - 1));
-	     
-	    globe.time = actTime;
-        Module._free(oup);
-    } else {
-		if(i == 0) i = 1;
-		else i*=16;
-    }
-}, 0);
-
-
 function clamp(value, min, max) {
     return value < min ? min : value > max ? max : value;
 }
@@ -469,27 +428,16 @@ void main() {
     }
 }
 
-function clickRedirect(r, g, b, a){
-	console.log(r, g, b, a, "uwu");
-	if(a > 100){
-		     if(r == 218, g ==  92, b ==  98) window.location.href = "https://nusea.she-a.eu";
-		else if(r == 203, g == 166, b == 247) window.location.href = "https://acrion.she-a.eu";
-		else if(r == 180, g == 190, b == 254) window.location.href = "https://kestun.she-a.eu";
-		else if(r == 245, g == 224, b == 220) window.location.href = "https://litea.she-a.eu";
-		else if(r ==  15, g == 101, b ==  74) window.location.href = "https://hestria.she-a.eu";
-		else if(r == 140, g == 232, b == 109) window.location.href = "https://tinar.she-a.eu";
-	}
-//	window.location.href = "https://sara.isthecutestpersonever.eu";
-}
-
 class Globe {
     constructor(
         /** @type {{
             rotationSpeed: number;
             zoomSpeed: number;
             ambientFactor: number;
-            ambientLightTransitionZoom: number;
-            ambientLightTransitionZoomMargin: number;
+            ambientZoom: number;
+            ambientZoomMargin: number;
+            axialTilt: number;
+            sunBaseAngle: number;
         }} */
         settings,
         /** @type HTMLCanvasElement */
@@ -497,14 +445,20 @@ class Globe {
         /** @type string */
         mapImageURL,
         /** @type string */
-        regionMapImageURL
+        regionMapImageURL,
+        /** @type {(r: number, g: number, b: number, a: number) => void} */
+        clickHandler,
+        /** @type {[number, number]} */
+        [startXRot, startYRot] = [0, 0]
     ) {
         /** @type {{
             rotationSpeed: number;
             zoomSpeed: number;
             ambientFactor: number;
-            ambientLightTransitionZoom: number;
-            ambientLightTransitionZoomMargin: number;
+            ambientZoom: number;
+            ambientZoomMargin: number;
+            axialTilt: number;
+            sunBaseAngle: number;
         }} */
         this.settings = settings;
 
@@ -513,6 +467,8 @@ class Globe {
 
         /** @type GlobeCanvas */
         this.canvas = new GlobeCanvas(this.canvasElement);
+        this.canvas.xRot = startXRot;
+        this.canvas.yRot = startYRot;
 
         /** @type {ImageData | null} */
         this.regionMapImageData = null;
@@ -542,12 +498,17 @@ class Globe {
         this.mount();
 
         /** @type number */
+        this.axialTiltSin = Math.sin(this.settings.axialTilt);
+        /** @type number */
+        this.axialTiltCos = Math.cos(this.settings.axialTilt);
+        /** @type number */
         this.time_ = null;
         this.time = 0;
 
         this.scale = 1;
 
-        requestAnimationFrame(this.drawFrame);
+        /** @type {(r: number, g: number, b: number, a: number) => void} */
+        this.clickHandler = clickHandler;
     }
 
     /** @type {[number, number] | null} */
@@ -574,7 +535,7 @@ class Globe {
             startIndex,
             startIndex + 4
         );
-        clickRedirect( r, g, b, a);
+        this.clickHandler(r, g, b, a);
     };
 
     mouseDown = (
@@ -615,7 +576,7 @@ class Globe {
         if (!newRots) return;
         this.canvas.xRot = newRots[0];
         this.canvas.yRot = newRots[1];
-		//console.log("xRot = " + this.canvas.xRot + "\nyRot = " + this.canvas.yRot);
+        //console.log("xRot = " + this.canvas.xRot + "\nyRot = " + this.canvas.yRot);
     };
 
     wheel = (
@@ -671,8 +632,13 @@ class Globe {
     set time(value) {
         if (value === this.time_) return;
         this.time_ = value;
-        const angle = value * 2 * Math.PI;
-        this.canvas.sunDir = [Math.cos(angle), 0, Math.sin(angle)];
+        const sunAngle = value * 2 * Math.PI + this.settings.sunBaseAngle;
+        const mSinSunAngle = -Math.sin(sunAngle);
+        this.canvas.sunDir = [
+            this.axialTiltCos * mSinSunAngle,
+            this.axialTiltSin * mSinSunAngle,
+            -Math.cos(sunAngle),
+        ];
     }
 
     get scale() {
@@ -687,8 +653,8 @@ class Globe {
     updateAmbientFactor() {
         const transitionFactor = Math.sin(
             clamp(
-                (this.canvas.scale - this.settings.ambientLightTransitionZoom) /
-                    this.settings.ambientLightTransitionZoomMargin,
+                (this.canvas.scale - this.settings.ambientZoom) /
+                    this.settings.ambientZoomMargin,
                 -1,
                 1
             ) *
@@ -719,6 +685,10 @@ class Globe {
         this.canvas.redraw();
         requestAnimationFrame(this.drawFrame);
     };
+
+    startRendering() {
+        requestAnimationFrame(this.drawFrame);
+    }
 }
 
 const globe = new Globe(
@@ -726,26 +696,68 @@ const globe = new Globe(
         rotationSpeed: 0,
         zoomSpeed: 1 / 1500,
         ambientFactor: 0.5,
-        ambientLightTransitionZoom: 2,
-        ambientLightTransitionZoomMargin: 1,
+        ambientZoom: 2,
+        ambientZoomMargin: 1,
+        axialTilt: (23.5 * Math.PI) / 180,
+        sunBaseAngle: -0.196 * 2 * Math.PI,
     },
     document.getElementById("canvas"),
-    "/img/map.png",
-    "/img/color.png"
+    "img/map.png",
+    "img/color.png",
+    clickRedirect,
+    [-0.2, 3.35]
 );
-var randtime = 0;
-const updateTime = () => {
-    const date = new Date();
-    const earthTime =
-        ((date.getUTCSeconds() / 60 + date.getUTCMinutes()) / 60 +
-            date.getUTCHours()) /
-        24;
-	randtime += 0.0001;
-	while(randtime >= 1)
-		randtime -= 1;
-//    globe.time = randtime;
+
+// Click redirection
+
+const regionColors = {
+    nusea: [218, 92, 98],
+    acrion: [203, 166, 247],
+    kestun: [180, 190, 254],
+    litea: [245, 224, 220],
+    hestria: [15, 101, 74],
+    tinar: [140, 232, 109],
 };
-//updateTime();
-setInterval(updateTime, 1);
-globe.canvas.yRot=3.35;
-globe.canvas.xRot=-.2;
+
+function clickRedirect(r, g, b, a) {
+    if (a > 100) {
+        for (const regionName in regionColors) {
+            const [rr, rg, rb] = regionColors[regionName];
+            if (r === rr && g === rg && b === rb) {
+                window.location.href = `https://${regionName}.she-a.eu`;
+                break;
+            }
+        }
+    }
+}
+
+// Time handling
+
+onWASMLoad(CyraTime, (CyraTime) => {
+    if (CyraTime) {
+        const curtime = CyraTime.cwrap("curtime", null, ["number"]);
+        const updateTime = () => {
+            const outputBytes = CyraTime._malloc(50);
+            curtime(outputBytes);
+            /** @type string */
+            const output = CyraTime.UTF8ToString(outputBytes).slice(0, -1);
+            CyraTime._free(outputBytes);
+
+            const [, timeStr] = output.split(" ");
+            const [hourStr, halfHourStr, [minuteStr, secondStr]] = [
+                timeStr[0],
+                timeStr[1],
+                timeStr.substring(2).split(":"),
+            ];
+            const hour = parseInt(hourStr, 16);
+            const minute = parseInt(minuteStr, 8) + 60 * +(halfHourStr === "x");
+            const second = parseInt(secondStr, 10);
+            globe.time = ((second / 46 + minute) / 120 + hour) / 16;
+        };
+        updateTime();
+        setInterval(updateTime, 1000);
+    }
+    globe.startRendering();
+}, {
+    arguments: ["e"],
+});
