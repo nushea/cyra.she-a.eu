@@ -464,11 +464,13 @@ class Globe {
 
         /** @type HTMLCanvasElement */
         this.canvasElement = canvasElement;
-
         /** @type GlobeCanvas */
         this.canvas = new GlobeCanvas(this.canvasElement);
         this.canvas.xRot = startXRot;
         this.canvas.yRot = startYRot;
+		
+		const maxSize = (this.canvas.gl.getParameter(this.canvas.gl.MAX_TEXTURE_SIZE));
+		//document.getElementById("test").innerHTML = maxSize;
 
         /** @type {ImageData | null} */
         this.regionMapImageData = null;
@@ -490,7 +492,10 @@ class Globe {
 
         /** @type HTMLImageElement */
         this.mapImage = new Image();
-        this.mapImage.src = mapImageURL;
+        this.mapImage.src = (maxSize >= 10240)? "/img/LOD-4-map.png" : 
+							(maxSize >=  8192)? "/img/LOD-3-map.png" : 
+							(maxSize >=  4096)? "/img/LOD-2-map.png" : 
+							(maxSize >=  2048)? "/img/LOD-1-map.png" : mapImageURL;
         this.mapImage.addEventListener("load", () => {
             this.canvas.setMap(this.mapImage);
         });
@@ -702,7 +707,7 @@ const globe = new Globe(
         sunBaseAngle: -0.196 * 2 * Math.PI,
     },
     document.getElementById("canvas"),
-    "img/map.png",
+    "img/LOD-0-map.png",
     "img/color.png",
     clickRedirect,
     [-0.2, 3.35]

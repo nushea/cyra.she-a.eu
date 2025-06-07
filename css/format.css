@@ -27,11 +27,11 @@ body,
 }
 
 #Upper {
-	height: 20vh;
+	height: 16vh;
 }
 
 #Lower {
-	height: 50%;
+	height: 80%;
 	width: 100%;
 	position: static;
 	z-index: 0;
