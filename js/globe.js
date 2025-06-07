@@ -475,7 +475,10 @@ class Globe {
         /** @type {ImageData | null} */
         this.regionMapImageData = null;
         const regionMapImage = new Image();
-        regionMapImage.src = regionMapImageURL;
+        regionMapImage.src =(maxSize >= 10240)? "/img/LOD-4-color.png" : 
+							(maxSize >=  8192)? "/img/LOD-3-color.png" : 
+							(maxSize >=  4096)? "/img/LOD-2-color.png" : 
+							(maxSize >=  2048)? "/img/LOD-1-color.png" : regionMapImageURL;
         regionMapImage.addEventListener("load", () => {
             const canvas = document.createElement("canvas");
             const ctx = canvas.getContext("2d");
