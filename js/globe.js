@@ -2,6 +2,207 @@ function clamp(value, min, max) {
     return value < min ? min : value > max ? max : value;
 }
 
+class MapChunker {
+    constructor(
+        /** @type WebGLRenderingContext */
+        gl
+    ) {
+        const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+
+        /** @type HTMLCanvasElement */
+        this.canvas = document.createElement("canvas");
+        this.canvas.width = maxTextureSize;
+        this.canvas.height = maxTextureSize;
+        /** @type CanvasRenderingContext2D */
+        this.ctx = this.canvas.getContext("2d");
+        /** @type WebGLRenderingContext */
+        this.gl = gl;
+
+        /** @type number */
+        this.maxTextureSize = maxTextureSize;
+
+        /** @type {HTMLImageElement | null} */
+        this.map_ = null;
+        /** @type {[number, number] | null} */
+        this.maxDivs = null;
+        /** @type {[number, number] | null} */
+        this.chunkLevel_ = null;
+        /** @type {[number, number] | null} */
+        this.chunkSrcSize = null;
+        /** @type {[number, number] | null} */
+        this.chunkDstSize = null;
+        /** @type {[[WebGLTexture | null]] | null} */
+        this.chunks = null;
+    }
+
+    get map() {
+        return this.map_;
+    }
+
+    set map(value) {
+        if (value === this.map_) return;
+        this.map_ = value;
+        this.maxDivs = this.map_
+            ? [
+                  Math.max(Math.ceil(this.map_.width / this.maxTextureSize), 2),
+                  Math.max(
+                      Math.ceil(this.map_.height / this.maxTextureSize),
+                      2
+                  ),
+              ]
+            : null;
+        while (this.map_.width % this.maxDivs[0] !== 0) {
+            this.maxDivs[0]++;
+        }
+        while (this.map_.height % this.maxDivs[1] !== 0) {
+            this.maxDivs[1]++;
+        }
+        this.chunkLevel_ = null;
+        this.resetChunks();
+    }
+
+    get chunkLevel() {
+        return this.chunkLevel_;
+    }
+
+    set chunkLevel(value) {
+        if (
+            value === this.chunkLevel_ ||
+            (value &&
+                this.chunkLevel_ &&
+                value[0] === this.chunkLevel_[0] &&
+                value[1] === this.chunkLevel_[1])
+        )
+            return;
+        this.chunkLevel_ = value;
+        this.resetChunks();
+    }
+
+    chunkLevelForView(
+        /** @type {[number, number]} */
+        [viewWidth, viewHeight]
+    ) {
+        let xDivs = Math.min(Math.floor(1 / viewWidth), this.maxDivs[0]);
+        let yDivs = Math.min(Math.floor(1 / viewHeight), this.maxDivs[1]);
+        while (this.map_.width % xDivs !== 0) {
+            xDivs--;
+        }
+        while (this.map_.height % yDivs !== 0) {
+            yDivs--;
+        }
+        return [xDivs, yDivs];
+    }
+
+    chunkAtUV(
+        /** @type {[number, number]} */
+        [x, y]
+    ) {
+        return [
+            Math.floor(x * this.chunkLevel_[0]),
+            Math.floor(y * this.chunkLevel_[1]),
+        ];
+    }
+
+    chunkUV(
+        /** @type {[number, number]} */
+        [xI, yI]
+    ) {
+        return [xI / this.chunkLevel_[0], yI / this.chunkLevel_[1]];
+    }
+
+    chunkCenterUV(
+        /** @type {[number, number]} */
+        [xI, yI]
+    ) {
+        return [
+            (xI + 0.5) / this.chunkLevel_[0],
+            (yI + 0.5) / this.chunkLevel_[1],
+        ];
+    }
+
+    resetChunks() {
+        if (this.chunks) {
+            for (const row of this.chunks) {
+                for (const chunk of row) {
+                    if (!chunk) continue;
+                    this.gl.deleteTexture(chunk);
+                }
+            }
+        }
+        this.chunks = null;
+        if (this.map_ && this.chunkLevel_) {
+            this.chunkSrcSize = [
+                this.map_.width / this.chunkLevel_[0],
+                this.map_.height / this.chunkLevel_[1],
+            ];
+            this.chunkDstSize = [
+                Math.min(this.chunkSrcSize[0], this.maxTextureSize),
+                Math.min(this.chunkSrcSize[1], this.maxTextureSize),
+            ];
+        } else {
+            this.chunkSrcSize = null;
+            this.chunkDstSize = null;
+        }
+    }
+
+    bindChunk(
+        /** @type {[number, number]} */
+        [xI, yI]
+    ) {
+        const gl = this.gl;
+
+        if (!this.chunks) {
+            this.chunks = [];
+            for (let y = 0; y < this.chunkLevel_[1]; y++) {
+                this.chunks.push(new Array(this.chunkLevel_[0]).fill(null));
+            }
+        }
+
+        /** @type WebGLTexture */
+        let texture;
+        if ((texture = this.chunks[yI][xI])) {
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            return;
+        }
+
+        const chunkX = (xI * this.map_.width) / this.chunkLevel_[0];
+        const chunkY = (yI * this.map_.height) / this.chunkLevel_[1];
+        this.ctx.drawImage(
+            this.map_,
+            chunkX,
+            chunkY,
+            this.chunkSrcSize[0],
+            this.chunkSrcSize[1],
+            0,
+            0,
+            this.chunkDstSize[0],
+            this.chunkDstSize[1]
+        );
+        const data = this.ctx.getImageData(
+            0,
+            0,
+            this.chunkDstSize[0],
+            this.chunkDstSize[1]
+        );
+
+        texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            data
+        );
+
+        this.chunks[yI][xI] = texture;
+    }
+}
+
 class GlobeCanvas {
     compileShader(
         /** @type GLenum */
@@ -53,10 +254,12 @@ class GlobeCanvas {
             `
 attribute vec2 pos;
 varying vec2 pos_;
-uniform vec2 radius;
+
+uniform vec2 scaledRadius;
+
 void main() {
     pos_ = pos;
-    gl_Position = vec4(pos_ * radius, 0.0, 1.0);
+    gl_Position = vec4(pos_ * scaledRadius, 0.0, 1.0);
 }
 `
         );
@@ -78,7 +281,13 @@ precision mediump float;
 
 varying vec2 pos_;
 
-uniform sampler2D map;
+uniform sampler2D mapTL;
+uniform sampler2D mapTR;
+uniform sampler2D mapBL;
+uniform sampler2D mapBR;
+uniform vec2 mapChunksStart;
+uniform vec2 mapChunksLen;
+
 uniform float xRot;
 uniform float yRot;
 uniform vec3 sunDir;
@@ -100,7 +309,22 @@ void main() {
         );
         float theta = acos(pos.y);
         float phi = mod(atan(pos.x, pos.z), TAU);
-        vec3 mapColor = texture2D(map, vec2(phi / TAU, theta / PI)).rgb;
+        
+        vec2 chunkOffset = fract(vec2(phi / TAU, theta / PI) - mapChunksStart) * mapChunksLen;
+        float chunkYOffset = chunkOffset.x >= 2.0 ? 1.0 - chunkOffset.y : chunkOffset.y;
+        vec3 mapColor;
+        if (chunkYOffset < 1.0) {
+            if (chunkOffset.x < 1.0) {
+                mapColor = texture2D(mapTL, fract(chunkOffset)).rgb;
+            } else {
+                mapColor = texture2D(mapTR, fract(chunkOffset)).rgb;
+            }
+        } else if (chunkOffset.x < 1.0) {
+            mapColor = texture2D(mapBL, fract(chunkOffset)).rgb;
+        } else {
+            mapColor = texture2D(mapBR, fract(chunkOffset)).rgb;
+        }
+        
         float lighting = clamp((dot(pos, -sunDir) * SUN_POWER + 1.0) / 2.0, 0.0, 1.0)
             * (1.0 - ambientFactor)
             + ambientFactor;
@@ -132,37 +356,51 @@ void main() {
         gl.enableVertexAttribArray(posAttrib);
         gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, true, 0, 0);
 
+        /** @type {MapChunker} */
+        this.mapChunker = new MapChunker(gl);
+        /** @type {[number, number] | null} */
+        this.mapChunksStart = null;
+        /** @type WebGLUniformLocation */
+        this.mapChunksStartUniform = gl.getUniformLocation(
+            program,
+            "mapChunksStart"
+        );
+        /** @type WebGLUniformLocation */
+        this.mapChunksLenUniform = gl.getUniformLocation(
+            program,
+            "mapChunksLen"
+        );
+
         /** @type number */
         this.scale_ = 1;
         /** @type {[number, number]} */
         this.radius_ = [1, 1];
-        /** @type WebGLUniformLocation */
-        this.radiusUniform = gl.getUniformLocation(program, "radius");
-        /** @type number */
-        this.scale = this.scale_;
         /** @type {[number, number]} */
-        this.radius = this.radius_;
+        this.scaledRadius_ = [1, 1];
+        /** @type WebGLUniformLocation */
+        this.scaledRadiusUniform = gl.getUniformLocation(
+            program,
+            "scaledRadius"
+        );
+        this.updateScaledRadius();
 
         /** @type number */
         this.xRot_ = 0;
         /** @type WebGLUniformLocation */
         this.xRotUniform = gl.getUniformLocation(program, "xRot");
-        /** @type number */
-        this.xRot = this.xRot_;
+        this.updateXRot();
 
         /** @type number */
         this.yRot_ = 0;
         /** @type WebGLUniformLocation */
         this.yRotUniform = gl.getUniformLocation(program, "yRot");
-        /** @type number */
-        this.yRot = this.yRot_;
+        this.updateYRot();
 
         /** @type {[number, number, number]} */
         this.sunDir_ = [0, 0, -1.0];
         /** @type WebGLUniformLocation */
         this.sunDirUniform = gl.getUniformLocation(program, "sunDir");
-        /** @type number */
-        this.sunDir = this.sunDir_;
+        this.updateSunDir();
 
         /** @type number */
         this.ambientFactor_ = 1.0;
@@ -171,20 +409,18 @@ void main() {
             program,
             "ambientFactor"
         );
-        /** @type number */
-        this.ambientFactor = this.ambientFactor_;
+        this.updateAmbientFactor();
 
-        /** @type WebGLUniformLocation */
-        this.mapUniform = gl.getUniformLocation(program, "map");
-        /** @type WebGLTexture */
-        this.mapTexture = gl.createTexture();
-        const mapTextureUnit = 0;
-        gl.activeTexture(gl.TEXTURE0 + mapTextureUnit);
-        gl.bindTexture(gl.TEXTURE_2D, this.mapTexture);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.uniform1i(this.mapUniform, mapTextureUnit);
+        /** @type {[WebGLUniformLocation, WebGLUniformLocation, WebGLUniformLocation, WebGLUniformLocation]} */
+        this.mapUniforms = [
+            gl.getUniformLocation(program, "mapTL"),
+            gl.getUniformLocation(program, "mapTR"),
+            gl.getUniformLocation(program, "mapBL"),
+            gl.getUniformLocation(program, "mapBR"),
+        ];
+        for (let i = 0; i < 4; i++) {
+            gl.uniform1i(this.mapUniforms[i], i);
+        }
 
         /** @type boolean */
         this.needsRedraw = false;
@@ -196,14 +432,30 @@ void main() {
         this.resize();
     }
 
-    updateRadius() {
+    updateScaledRadius() {
         const gl = this.gl;
         gl.uniform2f(
-            this.radiusUniform,
-            this.radius_[0] * this.scale_,
-            this.radius_[1] * this.scale_
+            this.scaledRadiusUniform,
+            this.scaledRadius_[0],
+            this.scaledRadius_[1]
         );
         this.needsRedraw = true;
+        this.updateChunks();
+    }
+
+    get scaledRadius() {
+        return this.scaledRadius_;
+    }
+
+    set scaledRadius(value) {
+        if (
+            value[0] === this.scaledRadius_[0] &&
+            value[1] === this.scaledRadius_[1]
+        ) {
+            return;
+        }
+        this.scaledRadius_ = value;
+        this.updateScaledRadius();
     }
 
     get scale() {
@@ -212,7 +464,10 @@ void main() {
 
     set scale(value) {
         this.scale_ = value;
-        this.updateRadius();
+        this.scaledRadius = [
+            this.radius_[0] * this.scale_,
+            this.radius_[1] * this.scale_,
+        ];
     }
 
     get radius() {
@@ -221,7 +476,17 @@ void main() {
 
     set radius(value) {
         this.radius_ = value;
-        this.updateRadius();
+        this.scaledRadius = [
+            this.radius_[0] * this.scale_,
+            this.radius_[1] * this.scale_,
+        ];
+    }
+
+    updateXRot() {
+        const gl = this.gl;
+        gl.uniform1f(this.xRotUniform, this.xRot_);
+        this.needsRedraw = true;
+        this.updateChunks();
     }
 
     get xRot() {
@@ -229,10 +494,16 @@ void main() {
     }
 
     set xRot(value) {
-        const gl = this.gl;
+        if (value === this.xRot_) return;
         this.xRot_ = value;
-        gl.uniform1f(this.xRotUniform, value);
+        this.updateXRot();
+    }
+
+    updateYRot() {
+        const gl = this.gl;
+        gl.uniform1f(this.yRotUniform, this.yRot_);
         this.needsRedraw = true;
+        this.updateChunks();
     }
 
     get yRot() {
@@ -240,9 +511,19 @@ void main() {
     }
 
     set yRot(value) {
-        const gl = this.gl;
+        if (value === this.yRot_) return;
         this.yRot_ = value;
-        gl.uniform1f(this.yRotUniform, value);
+        this.updateYRot();
+    }
+
+    updateSunDir() {
+        const gl = this.gl;
+        gl.uniform3f(
+            this.sunDirUniform,
+            this.sunDir_[0],
+            this.sunDir_[1],
+            this.sunDir_[2]
+        );
         this.needsRedraw = true;
     }
 
@@ -251,9 +532,20 @@ void main() {
     }
 
     set sunDir(value) {
-        const gl = this.gl;
+        if (
+            value[0] === this.sunDir_[0] &&
+            value[1] === this.sunDir_[1] &&
+            value[2] === this.sunDir_[2]
+        ) {
+            return;
+        }
         this.sunDir_ = value;
-        gl.uniform3f(this.sunDirUniform, value[0], value[1], value[2]);
+        this.updateSunDir();
+    }
+
+    updateAmbientFactor() {
+        const gl = this.gl;
+        gl.uniform1f(this.ambientFactorUniform, this.ambientFactor_);
         this.needsRedraw = true;
     }
 
@@ -262,27 +554,139 @@ void main() {
     }
 
     set ambientFactor(value) {
-        const gl = this.gl;
+        if (value === this.ambientFactor_) return;
         this.ambientFactor_ = value;
-        gl.uniform1f(this.ambientFactorUniform, value);
-        this.needsRedraw = true;
+        this.updateAmbientFactor();
     }
 
-    setMap(
-        /** @type HTMLImageElement */
-        mapImage
-    ) {
-        const gl = this.gl;
-        gl.bindTexture(gl.TEXTURE_2D, this.mapTexture);
-        gl.texImage2D(
-            gl.TEXTURE_2D,
-            0,
-            gl.RGBA,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            mapImage
-        );
+    updateMap() {
         this.needsRedraw = true;
+        this.updateChunks();
+    }
+
+    get map() {
+        return this.mapChunker.map;
+    }
+
+    set map(value) {
+        if (value === this.mapChunker.map) return;
+        this.mapChunker.map = value;
+        this.mapChunksStart = null;
+        this.updateMap();
+    }
+
+    updateChunks() {
+        if (!this.mapChunker.map) {
+            this.mapChunksStart = null;
+            return;
+        }
+
+        const gl = this.gl;
+
+        const [cornerX, cornerY] = [
+            1 / this.scaledRadius_[0],
+            1 / this.scaledRadius_[1],
+        ];
+        const cornerZ = this.z([cornerX, cornerY]);
+        const viewXAngle = cornerZ
+            ? Math.atan(cornerX / cornerZ)
+            : Math.PI * 0.5;
+        const viewYAngle = cornerZ
+            ? Math.atan(cornerY / cornerZ)
+            : Math.PI * 0.5;
+        const viewWidth = viewXAngle / Math.PI;
+        const viewHeight = Math.min((2 * viewYAngle) / Math.PI, 0.5);
+
+        const chunkLevel = this.mapChunker.chunkLevelForView([
+            viewWidth,
+            viewHeight,
+        ]);
+        this.mapChunker.chunkLevel = chunkLevel;
+
+        if (!this.mapChunker.chunks) {
+            gl.uniform2f(
+                this.mapChunksLenUniform,
+                chunkLevel[0],
+                chunkLevel[1]
+            );
+        }
+
+        const center = this.anglesToUV(
+            this.projectNormalizedToAnglesWithRots(
+                [0, 0],
+                [this.xRot, this.yRot]
+            )
+        );
+        const centerChunk = this.mapChunker.chunkAtUV(center, chunkLevel);
+        const centerChunkCenter = this.mapChunker.chunkCenterUV(
+            centerChunk,
+            chunkLevel
+        );
+        let chunkIndices;
+        if (centerChunkCenter[1] < center[1]) {
+            if (centerChunkCenter[0] < center[0]) {
+                // Center chunk on the top left
+                chunkIndices = [
+                    centerChunk,
+                    [centerChunk[0] + 1, centerChunk[1]],
+                    [centerChunk[0], centerChunk[1] + 1],
+                    [centerChunk[0] + 1, centerChunk[1] + 1],
+                ];
+            } else {
+                // Center chunk on the top right
+                chunkIndices = [
+                    [centerChunk[0] - 1, centerChunk[1]],
+                    centerChunk,
+                    [centerChunk[0] - 1, centerChunk[1] + 1],
+                    [centerChunk[0], centerChunk[1] + 1],
+                ];
+            }
+        } else if (centerChunkCenter[0] < center[0]) {
+            // Center chunk on the bottom left
+            chunkIndices = [
+                [centerChunk[0], centerChunk[1] - 1],
+                [centerChunk[0] + 1, centerChunk[1] - 1],
+                centerChunk,
+                [centerChunk[0] + 1, centerChunk[1]],
+            ];
+        } else {
+            // Center chunk on the bottom right
+            chunkIndices = [
+                [centerChunk[0] - 1, centerChunk[1] - 1],
+                [centerChunk[0], centerChunk[1] - 1],
+                [centerChunk[0] - 1, centerChunk[1]],
+                centerChunk,
+            ];
+        }
+
+        const chunksStart = this.mapChunker.chunkUV(
+            chunkIndices[0],
+            chunkLevel
+        );
+        const chunksStartChanged =
+            !this.mapChunksStart ||
+            chunksStart[0] !== this.mapChunksStart[0] ||
+            chunksStart[1] !== this.mapChunksStart[1];
+        if (chunksStartChanged) {
+            this.mapChunksStart = chunksStart;
+            gl.uniform2f(
+                this.mapChunksStartUniform,
+                chunksStart[0],
+                chunksStart[1]
+            );
+        }
+
+        if (this.mapChunker.chunks && !chunksStartChanged) return;
+
+        for (let i = 0; i < 4; i++) {
+            gl.activeTexture(gl.TEXTURE0 + i);
+            const xI = (chunkIndices[i][0] + chunkLevel[0]) % chunkLevel[0];
+            const yI =
+                chunkLevel[1] -
+                1 -
+                Math.abs(chunkLevel[1] - 1 - Math.abs(chunkIndices[i][1]));
+            this.mapChunker.bindChunk([xI, yI]);
+        }
     }
 
     redraw() {
@@ -335,27 +739,45 @@ void main() {
         ];
     }
 
+    projectNormalizedToAnglesWithRots(
+        /** @type {[number, number]} */
+        [x, y],
+        /** @type {[number, number]} */
+        [xRot, yRot]
+    ) {
+        const z = this.z([x, y]);
+        if (z === null) return null;
+        const xRotSin = Math.sin(xRot);
+        const xRotCos = Math.cos(xRot);
+        const yRotSin = Math.sin(yRot);
+        const yRotCos = Math.cos(yRot);
+        const pos = [x, y, z];
+        [pos[1], pos[2]] = [
+            pos[1] * xRotCos - pos[2] * xRotSin,
+            pos[1] * xRotSin + pos[2] * xRotCos,
+        ];
+        [pos[0], pos[2]] = [
+            pos[0] * yRotCos - pos[2] * yRotSin,
+            pos[0] * yRotSin + pos[2] * yRotCos,
+        ];
+        const theta = Math.acos(pos[1]);
+        const phi = Math.atan2(pos[0], pos[2]);
+        return [
+            (theta + Math.PI) % Math.PI,
+            (phi + 2 * Math.PI) % (2 * Math.PI),
+        ];
+    }
+
     projectToAnglesWithRots(
         /** @type {[number, number]} */
         clientCoords,
         /** @type {[number, number]} */
-        [xRot, yRot]
+        rots
     ) {
-        const [x, y] = this.normalizeClientCoords(clientCoords);
-        const z = this.z([x, y]);
-        if (z === null) return null;
-        const pos = [x, y, z];
-        [pos[1], pos[2]] = [
-            pos[1] * Math.cos(xRot) - pos[2] * Math.sin(xRot),
-            pos[1] * Math.sin(xRot) + pos[2] * Math.cos(xRot),
-        ];
-        [pos[0], pos[2]] = [
-            pos[0] * Math.cos(yRot) - pos[2] * Math.sin(yRot),
-            pos[0] * Math.sin(yRot) + pos[2] * Math.cos(yRot),
-        ];
-        const theta = Math.acos(pos[1]);
-        const phi = Math.atan2(pos[0], pos[2]) % (2 * Math.PI);
-        return [theta, phi];
+        return this.projectNormalizedToAnglesWithRots(
+            this.normalizeClientCoords(clientCoords),
+            rots
+        );
     }
 
     projectToAngles(
@@ -464,21 +886,16 @@ class Globe {
 
         /** @type HTMLCanvasElement */
         this.canvasElement = canvasElement;
+
         /** @type GlobeCanvas */
         this.canvas = new GlobeCanvas(this.canvasElement);
         this.canvas.xRot = startXRot;
         this.canvas.yRot = startYRot;
-		
-		const maxSize = (this.canvas.gl.getParameter(this.canvas.gl.MAX_TEXTURE_SIZE));
-		//document.getElementById("test").innerHTML = maxSize;
 
         /** @type {ImageData | null} */
         this.regionMapImageData = null;
         const regionMapImage = new Image();
-        regionMapImage.src =(maxSize >= 10240)? "/img/LOD-4-color.png" : 
-							(maxSize >=  8192)? "/img/LOD-3-color.png" : 
-							(maxSize >=  4096)? "/img/LOD-2-color.png" : 
-							(maxSize >=  2048)? "/img/LOD-1-color.png" : regionMapImageURL;
+        regionMapImage.src = regionMapImageURL;
         regionMapImage.addEventListener("load", () => {
             const canvas = document.createElement("canvas");
             const ctx = canvas.getContext("2d");
@@ -495,12 +912,9 @@ class Globe {
 
         /** @type HTMLImageElement */
         this.mapImage = new Image();
-        this.mapImage.src = (maxSize >= 10240)? "/img/LOD-4-map.png" : 
-							(maxSize >=  8192)? "/img/LOD-3-map.png" : 
-							(maxSize >=  4096)? "/img/LOD-2-map.png" : 
-							(maxSize >=  2048)? "/img/LOD-1-map.png" : mapImageURL;
+        this.mapImage.src = mapImageURL;
         this.mapImage.addEventListener("load", () => {
-            this.canvas.setMap(this.mapImage);
+            this.canvas.map = this.mapImage;
         });
 
         this.mount();
@@ -558,6 +972,7 @@ class Globe {
         this.dragStartClientCoords = [e.clientX, e.clientY];
         this.dragStartXYZ = this.canvas.anglesToUnrotatedXYZ(dragStartAngles);
         this.isDragging = false;
+        e.preventDefault();
     };
 
     mouseUp = () => {
@@ -584,7 +999,13 @@ class Globe {
         if (!newRots) return;
         this.canvas.xRot = newRots[0];
         this.canvas.yRot = newRots[1];
-        //console.log("xRot = " + this.canvas.xRot + "\nyRot = " + this.canvas.yRot);
+    };
+
+    dragStart = (
+        /** @type MouseEvent */
+        e
+    ) => {
+        e.preventDefault();
     };
 
     wheel = (
@@ -613,6 +1034,7 @@ class Globe {
         this.canvasElement.addEventListener("mousedown", this.mouseDown);
         window.addEventListener("mouseup", this.mouseUp);
         this.canvasElement.addEventListener("mousemove", this.mouseMove);
+        this.canvasElement.addEventListener("dragstart", this.dragStart);
         this.canvasElement.addEventListener("wheel", this.wheel);
     }
 
@@ -621,6 +1043,7 @@ class Globe {
         this.canvasElement.removeEventListener("mousedown", this.mouseDown);
         window.removeEventListener("mouseup", this.mouseUp);
         this.canvasElement.removeEventListener("mousemove", this.mouseMove);
+        this.canvasElement.removeEventListener("dragstart", this.dragStart);
         this.canvasElement.removeEventListener("wheel", this.wheel);
     }
 
@@ -710,7 +1133,7 @@ const globe = new Globe(
         sunBaseAngle: -0.196 * 2 * Math.PI,
     },
     document.getElementById("canvas"),
-    "img/LOD-0-map.png",
+    "img/map.png",
     "img/color.png",
     clickRedirect,
     [-0.2, 3.35]
@@ -741,31 +1164,36 @@ function clickRedirect(r, g, b, a) {
 
 // Time handling
 
-onWASMLoad(CyraTime, (CyraTime) => {
-    if (CyraTime) {
-        const curtime = CyraTime.cwrap("curtime", null, ["number"]);
-        const updateTime = () => {
-            const outputBytes = CyraTime._malloc(50);
-            curtime(outputBytes);
-            /** @type string */
-            const output = CyraTime.UTF8ToString(outputBytes).slice(0, -1);
-            CyraTime._free(outputBytes);
+onWASMLoad(
+    CyraTime,
+    (CyraTime) => {
+        if (CyraTime) {
+            const curtime = CyraTime.cwrap("curtime", null, ["number"]);
+            const updateTime = () => {
+                const outputBytes = CyraTime._malloc(50);
+                curtime(outputBytes);
+                /** @type string */
+                const output = CyraTime.UTF8ToString(outputBytes).slice(0, -1);
+                CyraTime._free(outputBytes);
 
-            const [, timeStr] = output.split(" ");
-            const [hourStr, halfHourStr, [minuteStr, secondStr]] = [
-                timeStr[0],
-                timeStr[1],
-                timeStr.substring(2).split(":"),
-            ];
-            const hour = parseInt(hourStr, 16);
-            const minute = parseInt(minuteStr, 8) + 60 * +(halfHourStr === "x");
-            const second = parseInt(secondStr, 10);
-            globe.time = ((second / 46 + minute) / 120 + hour) / 16;
-        };
-        updateTime();
-        setInterval(updateTime, 1000);
+                const [, timeStr] = output.split(" ");
+                const [hourStr, halfHourStr, [minuteStr, secondStr]] = [
+                    timeStr[0],
+                    timeStr[1],
+                    timeStr.substring(2).split(":"),
+                ];
+                const hour = parseInt(hourStr, 16);
+                const minute =
+                    parseInt(minuteStr, 8) + 60 * +(halfHourStr === "x");
+                const second = parseInt(secondStr, 10);
+                globe.time = ((second / 46 + minute) / 120 + hour) / 16;
+            };
+            updateTime();
+            setInterval(updateTime, 1000);
+        }
+        globe.startRendering();
+    },
+    {
+        arguments: ["e"],
     }
-    globe.startRendering();
-}, {
-    arguments: ["e"],
-});
+);
