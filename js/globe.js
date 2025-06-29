@@ -1063,11 +1063,11 @@ class Globe {
     set time(value) {
         if (value === this.time_) return;
         this.time_ = value;
-        const sunAngle = value * 2 * Math.PI + this.settings.sunBaseAngle;
-        const mSinSunAngle = -Math.sin(sunAngle);
+        const sunAngle = value * 2 * Math.PI + this.settings.sunBaseAngle - 0.80;
+        const sinSunAngle = Math.sin(sunAngle);
         this.canvas.sunDir = [
-            this.axialTiltCos * mSinSunAngle,
-            this.axialTiltSin * mSinSunAngle,
+            this.axialTiltCos * sinSunAngle,
+            this.axialTiltSin * sinSunAngle,
             -Math.cos(sunAngle),
         ];
     }
@@ -1130,7 +1130,7 @@ const globe = new Globe(
         ambientZoom: 2,
         ambientZoomMargin: 1,
         axialTilt: (23.5 * Math.PI) / 180,
-        sunBaseAngle: -0.196 * 2 * Math.PI,
+        sunBaseAngle: 0.196 * 2 * Math.PI,
     },
     document.getElementById("canvas"),
     "img/map.png",
